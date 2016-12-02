@@ -17,27 +17,6 @@ const jest = "node_modules/.bin/jest"
 const buildOutputDir = "build"
 const jsTestPrefix = "__tests__/"
 
-// all: build/hterm_all.js
-
-// build/hterm_all.js: build/libapps
-//   LIBDOT_SEARCH_PATH=$(pwd) build/libapps/libdot/bin/concat.sh -i build/libapps/hterm/concat/hterm_all.concat -o build/hterm_all.js
-
-// build/libapps:
-//   git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps
-
-// build/closure-compiler-v20161024.jar:
-//   curl --location https://dl.google.com/closure-compiler/compiler-20161024.tar.gz | tar xvf - *.jar
-
-// build/hterm_compiled.js: build/closure-compiler-v20161024.jar build/hterm_all.js
-//   java -jar build/closure-compiler-v20161024.jar --emit_use_strict --compilation_level ADVANCED --warning_level VERBOSE --new_type_inf --jscomp_error '*' --js build/hterm_all.js > build/hterm_compiled.js
-
-// build/__tests__/consolechannel-test.js: js/consolechannel.js __tests__/consolechannel-test.js
-//   $(CLOSURE_COMPILER) $^ --js_output_file $@ --externs js/node_externs.js --externs js/jasmine-2.0-externs.js --externs js/hterm_externs.js
-
-// build/__tests__/consolechannel-test.js.teststamp: build/__tests__/consolechannel-test.js
-//   $(JEST) $<
-//   touch $@
-
 func buildOutput(name string) string {
 	return buildOutputDir + "/" + name
 }
@@ -175,7 +154,6 @@ func testDependencies() {
 		panic(fmt.Sprintf("%v", o.values))
 	}
 
-	//
 	files := map[string]*jsDependencies{
 		"base1.js": &jsDependencies{[]string{}, []string{"e1.js"}},
 		"base2.js": &jsDependencies{[]string{}, []string{"e1.js", "e2.js"}},
@@ -203,8 +181,6 @@ func testDependencies() {
 
 func main() {
 	testDependencies()
-
-	fmt.Printf("CLOSURE_COMPILER=%s\n", closureCompiler)
 
 	targets := []target{
 		&staticTarget{"libapps", []string{},
@@ -244,16 +220,6 @@ func main() {
 	targets = append(targets, &staticTarget{"compiled_tests.teststamp", jsCompiledTests,
 		[]string{jest + ` '--config={"testRegex": "/build/__tests__/"}'`, "touch $@"}})
 
-	// targets := []target{}
-	// for _, t := range jsTargets {
-	// 	targets = append(targets, t)
-	// }
-	// for _, t := range staticTargets {
-	// 	targets = append(targets, t)
-	// }
-
-	// targets = append(targets, makeJSTest("__tests__/consolechannel-test.js", []string{"js/consolechannel.js"})...)
-
 	allTargets := ""
 	targetOutput := ""
 	for i, target := range targets {
@@ -269,7 +235,7 @@ func main() {
 		targetOutput += "\n"
 	}
 
+	fmt.Printf("CLOSURE_COMPILER=%s\n", closureCompiler)
 	fmt.Printf("\nall: %s\n\n", allTargets)
-
 	fmt.Print(targetOutput)
 }
