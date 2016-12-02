@@ -1,18 +1,23 @@
 package main
 
 import (
-	"reflect"
+	"fmt"
 	"strings"
 
-	"fmt"
+	"github.com/evanj/webconsole/deps"
 )
 
 // For flag docs see:
 // https://github.com/google/closure-compiler/wiki/Using-NTI-(new-type-inference)
+// need to
 const closureVersion = "20161024"
 const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
-const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict --compilation_level ADVANCED --warning_level VERBOSE --new_type_inf --jscomp_error '*'"
+const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict " +
+	"--compilation_level ADVANCED --warning_level VERBOSE --new_type_inf " +
+	"--jscomp_error '*' " +
+	// must disable missing require: we don't use goog.require TODO: doesn't seem to work?
+	"--jscomp_off missingRequire"
 const jest = "node_modules/.bin/jest"
 const buildOutputDir = "build"
 const jsTestPrefix = "__tests__/"
@@ -83,105 +88,42 @@ type jsDependencies struct {
 	externs []string
 }
 
-type orderedStringSet struct {
-	values []string
-}
-
-func (s *orderedStringSet) contains(value string) bool {
-	for _, v := range s.values {
-		if v == value {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *orderedStringSet) add(value string) {
-	if !s.contains(value) {
-		s.values = append(s.values, value)
-	}
-}
-
-func (s *orderedStringSet) addAll(values []string) {
+func addAll(set map[string]struct{}, values []string) {
 	for _, v := range values {
-		s.add(v)
+		set[v] = struct{}{}
 	}
 }
 
-func reverse(values []string) []string {
-	for i := 0; i < len(values)/2; i++ {
-		j := len(values) - i - 1
-		values[i], values[j] = values[j], values[i]
+// produces an output map where each js file's dependencies are flattened
+func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*jsDependencies {
+	// convert the imports to the format used by the deps package
+	jsDeps := map[string][]string{}
+	for file, dependencies := range jsFiles {
+		jsDeps[file] = dependencies.imports
 	}
-	return values
-}
 
-func transitiveDependencies(files map[string]*jsDependencies, input string) *jsDependencies {
-	// imports must be ordered from leaves up to the root
-	imports := &orderedStringSet{[]string{}}
-	externs := &orderedStringSet{[]string{}}
+	out := map[string]*jsDependencies{}
+	for file := range jsFiles {
+		transitiveDeps := deps.Transitive(jsDeps, file)
 
-	// TODO: prevent self-import?
-	toVisit := []string{input}
-	for len(toVisit) > 0 {
-		// pop the next file to visit
-		in := toVisit[len(toVisit)-1]
-		toVisit = toVisit[:len(toVisit)-1]
-
-		// collect all of its imports and externs
-		deps := files[in]
-		for _, i := range deps.imports {
-			if !imports.contains(i) {
-				// we have not seen this import yet: must recursively visit
-				imports.add(i)
-				toVisit = append(toVisit, i)
-			}
+		// collect the set of externs corresponding to transitiveDeps
+		externsSet := map[string]struct{}{}
+		addAll(externsSet, jsFiles[file].externs)
+		for _, dep := range transitiveDeps {
+			addAll(externsSet, jsFiles[dep].externs)
 		}
-		externs.addAll(deps.externs)
-	}
 
-	reverse(imports.values)
-	return &jsDependencies{imports.values, externs.values}
-}
+		externs := make([]string, 0, len(externsSet))
+		for extern := range externsSet {
+			externs = append(externs, extern)
+		}
 
-// TODO: make this a real test
-func testDependencies() {
-	o := &orderedStringSet{}
-	o.add("a")
-	o.add("b")
-	o.add("a")
-	if !reflect.DeepEqual(o.values, []string{"a", "b"}) {
-		panic(fmt.Sprintf("%v", o.values))
+		out[file] = &jsDependencies{transitiveDeps, externs}
 	}
-
-	files := map[string]*jsDependencies{
-		"base1.js": &jsDependencies{[]string{}, []string{"e1.js"}},
-		"base2.js": &jsDependencies{[]string{}, []string{"e1.js", "e2.js"}},
-		"a.js":     &jsDependencies{[]string{"base1.js"}, []string{"e3.js"}},
-		"b.js":     &jsDependencies{[]string{"a.js", "base2.js"}, []string{}},
-	}
-
-	expected := files["base1.js"]
-	deps := transitiveDependencies(files, "base1.js")
-	if !reflect.DeepEqual(deps, expected) {
-		panic(fmt.Sprintf("%v ;;; %v != %v", reflect.DeepEqual(deps.imports, expected.imports), deps, files["base1.js"]))
-	}
-
-	// order of imports matters!
-	expectedImports := []string{"base1.js", "base2.js", "a.js"}
-	expectedExterns := []string{"e1.js", "e2.js", "e3.js"}
-	deps = transitiveDependencies(files, "b.js")
-	if !reflect.DeepEqual(expectedImports, deps.imports) {
-		panic(fmt.Sprintf("%v != %v", expectedImports, deps.imports))
-	}
-	if !reflect.DeepEqual(expectedExterns, deps.externs) {
-		panic(fmt.Sprintf("%v != %v", expectedExterns, deps.externs))
-	}
+	return out
 }
 
 func main() {
-	testDependencies()
-
 	targets := []target{
 		&staticTarget{"libapps", []string{},
 			[]string{"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps"}},
@@ -194,18 +136,40 @@ func main() {
 	jsFiles := map[string]*jsDependencies{
 		"js/consolechannel.js":             &jsDependencies{[]string{}, []string{"js/hterm_externs.js", "js/node_externs.js"}},
 		"__tests__/consolechannel-test.js": &jsDependencies{[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js"}},
+
+		"build/libapps/libdot/js/lib_f.js":             &jsDependencies{[]string{}, []string{"js/chrome_externs.js"}},
+		"build/libapps/libdot/js/lib.js":               &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_utf8.js":          &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_wc.js":            &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_storage.js":       &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_storage_local.js": &jsDependencies{[]string{"build/libapps/libdot/js/lib_storage.js"}, []string{}},
+
+		"js/htermwtf.js": &jsDependencies{[]string{
+			"build/libapps/libdot/js/lib.js",
+			// "build/libapps/libdot/js/lib_colors.js",
+			// "build/libapps/libdot/js/lib_message_manager.js",
+			// "build/libapps/libdot/js/lib_preference_manager.js",
+			// "build/libapps/libdot/js/lib_resource.js",
+			"build/libapps/libdot/js/lib_storage.js",
+			// "build/libapps/libdot/js/lib_storage_chrome.js",
+			"build/libapps/libdot/js/lib_storage_local.js",
+			// "build/libapps/libdot/js/lib_storage_memory.js",
+			// "build/libapps/libdot/js/lib_test_manager.js",
+			"build/libapps/libdot/js/lib_utf8.js",
+			"build/libapps/libdot/js/lib_wc.js",
+		}, []string{}},
 	}
 
+	jsFlattenedDeps := jsTransitiveDependencies(jsFiles)
 	jsInputs := []string{}
 	jsCompiledTests := []string{}
-	for inputPath := range jsFiles {
+	for inputPath, deps := range jsFlattenedDeps {
 		// compile each file individually: ensures the dependencies are correct
-		deps := transitiveDependencies(jsFiles, inputPath)
 		jsTarget := &jsModule{inputPath, deps.imports, deps.externs}
 		targets = append(targets, jsTarget)
-		jsInputs = append(jsInputs, inputPath)
 
-		// compile the tests
+		// flatten the map to a lists for other targets
+		jsInputs = append(jsInputs, inputPath)
 		if strings.HasPrefix(inputPath, jsTestPrefix) {
 			jsCompiledTests = append(jsCompiledTests, jsTarget.output())
 		}
