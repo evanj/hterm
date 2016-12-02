@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 
 	"fmt"
@@ -11,7 +12,7 @@ import (
 const closureVersion = "20161024"
 const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
-const closureCompiler = "java -jar " + closureJAR + " --emit_use_strict --compilation_level ADVANCED --warning_level VERBOSE --new_type_inf --jscomp_error '*'"
+const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict --compilation_level ADVANCED --warning_level VERBOSE --new_type_inf --jscomp_error '*'"
 const jest = "node_modules/.bin/jest"
 const buildOutputDir = "build"
 const jsTestPrefix = "__tests__/"
@@ -58,13 +59,17 @@ func (j *jsModule) output() string {
 }
 
 func (j *jsModule) compiledInputs() []string {
-	var out []string = []string{j.path}
-	return append(out, j.dependencies...)
+	var out []string = nil
+	out = append(out, j.dependencies...)
+	// the "original" file must go after all dependencies so the definitions are available
+	out = append(out, j.path)
+	return out
 }
 
 func (j *jsModule) inputs() []string {
 	out := j.compiledInputs()
-	return append(out, j.externs...)
+	out = append(out, j.externs...)
+	return append(out, closureJARPath)
 }
 
 func (j *jsModule) commands() []string {
@@ -99,34 +104,113 @@ type jsDependencies struct {
 	externs []string
 }
 
-// js tests are special: they require multiple targets
-// func makeJSTest(jsFiles map[string]*jsDependencies, input string, dependencies []string) []target {
-// 	out := []target{}
+type orderedStringSet struct {
+	values []string
+}
 
-// 	// rule to run the test, without compilation
-// 	allJSDependencies := []string{input}
-// 	allJSDependencies = append(allJSDependencies, dependencies...)
-// 	out = append(out, &staticTarget{input + ".teststamp", allJSDependencies,
-// 		[]string{"$(JEST) " + input, "touch $@"}})
+func (s *orderedStringSet) contains(value string) bool {
+	for _, v := range s.values {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
 
-// 	// rule to compile the test
-// 	out = append(out, &jsModule{input, dependencies})
-// 	allJSDependencies := []string{input}
-// 	allJSDependencies = append(allJSDependencies, dependencies...)
-// 	out = append(out, &staticTarget{input + ".teststamp", allJSDependencies,
-// 		[]string{"$(JEST) " + input, "touch $@"}})
+func (s *orderedStringSet) add(value string) {
+	if !s.contains(value) {
+		s.values = append(s.values, value)
+	}
+}
 
-// 	return out
-// }
+func (s *orderedStringSet) addAll(values []string) {
+	for _, v := range values {
+		s.add(v)
+	}
+}
+
+func reverse(values []string) []string {
+	for i := 0; i < len(values)/2; i++ {
+		j := len(values) - i - 1
+		values[i], values[j] = values[j], values[i]
+	}
+	return values
+}
+
+func transitiveDependencies(files map[string]*jsDependencies, input string) *jsDependencies {
+	// imports must be ordered from leaves up to the root
+	imports := &orderedStringSet{[]string{}}
+	externs := &orderedStringSet{[]string{}}
+
+	// TODO: prevent self-import?
+	toVisit := []string{input}
+	for len(toVisit) > 0 {
+		// pop the next file to visit
+		in := toVisit[len(toVisit)-1]
+		toVisit = toVisit[:len(toVisit)-1]
+
+		// collect all of its imports and externs
+		deps := files[in]
+		for _, i := range deps.imports {
+			if !imports.contains(i) {
+				// we have not seen this import yet: must recursively visit
+				imports.add(i)
+				toVisit = append(toVisit, i)
+			}
+		}
+		externs.addAll(deps.externs)
+	}
+
+	reverse(imports.values)
+	return &jsDependencies{imports.values, externs.values}
+}
+
+// TODO: make this a real test
+func testDependencies() {
+	o := &orderedStringSet{}
+	o.add("a")
+	o.add("b")
+	o.add("a")
+	if !reflect.DeepEqual(o.values, []string{"a", "b"}) {
+		panic(fmt.Sprintf("%v", o.values))
+	}
+
+	//
+	files := map[string]*jsDependencies{
+		"base1.js": &jsDependencies{[]string{}, []string{"e1.js"}},
+		"base2.js": &jsDependencies{[]string{}, []string{"e1.js", "e2.js"}},
+		"a.js":     &jsDependencies{[]string{"base1.js"}, []string{"e3.js"}},
+		"b.js":     &jsDependencies{[]string{"a.js", "base2.js"}, []string{}},
+	}
+
+	expected := files["base1.js"]
+	deps := transitiveDependencies(files, "base1.js")
+	if !reflect.DeepEqual(deps, expected) {
+		panic(fmt.Sprintf("%v ;;; %v != %v", reflect.DeepEqual(deps.imports, expected.imports), deps, files["base1.js"]))
+	}
+
+	// order of imports matters!
+	expectedImports := []string{"base1.js", "base2.js", "a.js"}
+	expectedExterns := []string{"e1.js", "e2.js", "e3.js"}
+	deps = transitiveDependencies(files, "b.js")
+	if !reflect.DeepEqual(expectedImports, deps.imports) {
+		panic(fmt.Sprintf("%v != %v", expectedImports, deps.imports))
+	}
+	if !reflect.DeepEqual(expectedExterns, deps.externs) {
+		panic(fmt.Sprintf("%v != %v", expectedExterns, deps.externs))
+	}
+}
 
 func main() {
+	testDependencies()
+
 	fmt.Printf("CLOSURE_COMPILER=%s\n", closureCompiler)
 
 	targets := []target{
 		&staticTarget{"libapps", []string{},
 			[]string{"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps"}},
 		&staticTarget{closureJAR, []string{},
-			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvf - *.jar"}},
+			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvf - -C " + buildOutputDir + " *.jar"}},
 		&staticTarget{"hterm_all.js", []string{closureJARPath, buildOutput("libapps")},
 			[]string{"LIBDOT_SEARCH_PATH=$(pwd) build/libapps/libdot/bin/concat.sh -i build/libapps/hterm/concat/hterm_all.concat -o build/hterm_all.js"}},
 	}
@@ -138,9 +222,9 @@ func main() {
 
 	jsInputs := []string{}
 	jsCompiledTests := []string{}
-	for inputPath, deps := range jsFiles {
+	for inputPath := range jsFiles {
 		// compile each file individually: ensures the dependencies are correct
-		// TODO: compute the *transitive dependencies* for the rule; this is just the direct dependencies
+		deps := transitiveDependencies(jsFiles, inputPath)
 		jsTarget := &jsModule{inputPath, deps.imports, deps.externs}
 		targets = append(targets, jsTarget)
 		jsInputs = append(jsInputs, inputPath)
