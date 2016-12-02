@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style type="text/css">
+body, html, #terminal {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  /*position: absolute;*/
+  padding: 0;
+  margin: 0;
+/*  height: 100%;
+  width: 100%;*/
+}
+
+#terminal {
+  position: relative;
+}
+</style>
+<script src="hterm_all.js" type="text/javascript"></script>
+<script src="hterm_echo.js" type="text/javascript"></script>
+<script type="text/javascript">
+
+
+function loaded() {
+  // from https://chromium.googlesource.com/apps/libapps/+/master/hterm/doc/embed.md
+  hterm.defaultStorage = new lib.Storage.Memory();
+  var terminal = new hterm.Terminal("default");
+
+  terminal.onTerminalReady = function() {
+    // Create a new terminal IO object and give it the foreground.
+    // (The default IO object just prints warning messages about unhandled
+    // things to the the JS console.)
+    var io = terminal.io.push();
+
+    function send(str) {
+      // Do something useful with str here.
+      // For example, Secure Shell forwards the string onto the NaCl plugin.
+      console.log("key/send from terminal:", str);
+      relay.write(str, function(success) { console.log("send onComplete", success); });
+    }
+
+    io.onVTKeystroke = send;
+    io.sendString = send;
+
+    io.onTerminalResize = function(columns, rows) {
+      // React to size changes here.
+      // Secure Shell pokes at NaCl, which eventually results in
+      // some ioctls on the host.
+      console.log("resize", columns, rows)
+      relay.setSize(columns, rows)
+    };
+
+    console.log("hello terminal.onTerminalReady()");
+    terminal.setCursorPosition(0, 0);
+    terminal.setCursorVisible(true);
+    terminal.installKeyboard();
+
+    var relay = new ejhack.Relay("/");
+    relay.startRead(io);
+  };
+
+  terminalElement = document.getElementById("terminal")
+  console.log("decorating", terminalElement);
+  terminal.decorate(terminalElement);
+}
+
+document.addEventListener('DOMContentLoaded', loaded);
+</script>
+</head>
+<body>
+<div id="terminal"></div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "devDependencies": {
+    "jest": "latest"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "jest": {
+    "testPathIgnorePatterns": [
+      "/node_modules/", "/build/"
+    ]
+  }
+}
