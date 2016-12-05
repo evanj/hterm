@@ -15,9 +15,57 @@ const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
 const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict " +
 	"--compilation_level ADVANCED --warning_level VERBOSE --new_type_inf " +
-	"--jscomp_error '*' " +
+	// "--jscomp_error '*' " +
+
 	// must disable missing require: we don't use goog.require TODO: doesn't seem to work?
-	"--jscomp_off missingRequire"
+	// "--jscomp_off missingRequire"
+
+	" --jscomp_error accessControls" +
+	" --jscomp_error ambiguousFunctionDecl" +
+	" --jscomp_error checkEventfulObjectDisposal" +
+	" --jscomp_error checkRegExp" +
+	" --jscomp_error checkTypes" +
+	" --jscomp_error checkVars" +
+	" --jscomp_error commonJsModuleLoad" +
+	" --jscomp_error conformanceViolations" +
+	" --jscomp_error const" +
+	" --jscomp_error constantProperty" +
+	" --jscomp_error deprecated" +
+	" --jscomp_error deprecatedAnnotations" +
+	" --jscomp_error duplicateMessage" +
+	" --jscomp_error es3" +
+	" --jscomp_error es5Strict" +
+	" --jscomp_error externsValidation" +
+	" --jscomp_error fileoverviewTags" +
+	" --jscomp_error functionParams" +
+	" --jscomp_error globalThis" +
+	" --jscomp_error internetExplorerChecks" +
+	" --jscomp_error invalidCasts" +
+	" --jscomp_error misplacedTypeAnnotation" +
+	" --jscomp_error missingGetCssName" +
+	" --jscomp_error missingOverride" +
+	" --jscomp_error missingPolyfill" +
+	" --jscomp_error missingProperties" +
+	" --jscomp_error missingProvide" +
+	// " --jscomp_error missingRequire" +
+	" --jscomp_error missingReturn" +
+	" --jscomp_error msgDescriptions" +
+	" --jscomp_error newCheckTypes" +
+	" --jscomp_error nonStandardJsDocs" +
+	// " --jscomp_error reportUnknownTypes" +
+	" --jscomp_error suspiciousCode" +
+	" --jscomp_error strictModuleDepCheck" +
+	" --jscomp_error typeInvalidation" +
+	" --jscomp_error undefinedNames" +
+	" --jscomp_error undefinedVars" +
+	" --jscomp_error unknownDefines" +
+	" --jscomp_error unusedLocalVariables" +
+	" --jscomp_error unusedPrivateMembers" +
+	" --jscomp_error uselessCode" +
+	" --jscomp_error useOfGoogBase" +
+	" --jscomp_error underscore" +
+	" --jscomp_error visibility"
+
 const jest = "node_modules/.bin/jest"
 const buildOutputDir = "build"
 const jsTestPrefix = "__tests__/"
@@ -102,15 +150,20 @@ func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*js
 		jsDeps[file] = dependencies.imports
 	}
 
+	graph := deps.NewGraph(jsDeps)
+
 	out := map[string]*jsDependencies{}
 	for file := range jsFiles {
-		transitiveDeps := deps.Transitive(jsDeps, file)
+		// transitiveDeps includes file as the last item
+		transitiveDeps := graph.Dependencies(file)
 
 		// collect the set of externs corresponding to transitiveDeps
 		externsSet := map[string]struct{}{}
-		addAll(externsSet, jsFiles[file].externs)
 		for _, dep := range transitiveDeps {
-			addAll(externsSet, jsFiles[dep].externs)
+			depInfo := jsFiles[dep]
+			if depInfo != nil {
+				addAll(externsSet, jsFiles[dep].externs)
+			}
 		}
 
 		externs := make([]string, 0, len(externsSet))
@@ -118,7 +171,8 @@ func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*js
 			externs = append(externs, extern)
 		}
 
-		out[file] = &jsDependencies{transitiveDeps, externs}
+		// exclude the file itself as a dependency
+		out[file] = &jsDependencies{transitiveDeps[:len(transitiveDeps)-1], externs}
 	}
 	return out
 }
@@ -134,30 +188,59 @@ func main() {
 	}
 
 	jsFiles := map[string]*jsDependencies{
-		"js/consolechannel.js":             &jsDependencies{[]string{}, []string{"js/hterm_externs.js", "js/node_externs.js"}},
+		"js/consolechannel.js": &jsDependencies{[]string{}, []string{"js/node_externs.js"}},
+
+		// "js/webconsole_demo.js": &jsDependencies{[]string{
+		// 	"js/consolechannel.js",
+		// 	"build/libapps/hterm/js/hterm_terminal.js",
+		// 	"build/libapps/libdot/js/lib_storage_memory.js"}, []string{}},
+
+		"js/webconsole_demo.js": &jsDependencies{[]string{
+			"js/consolechannel.js"}, []string{"js/hterm_externs.js"}},
+
 		"__tests__/consolechannel-test.js": &jsDependencies{[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js"}},
 
-		"build/libapps/libdot/js/lib_f.js":             &jsDependencies{[]string{}, []string{"js/chrome_externs.js"}},
-		"build/libapps/libdot/js/lib.js":               &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_utf8.js":          &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_wc.js":            &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_storage.js":       &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_storage_local.js": &jsDependencies{[]string{"build/libapps/libdot/js/lib_storage.js"}, []string{}},
+		"build/libapps/libdot/js/lib_f.js":              &jsDependencies{[]string{}, []string{"js/chrome_extension_externs.js"}},
+		"build/libapps/libdot/js/lib.js":                &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_colors.js":         &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_utf8.js":           &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_wc.js":             &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_storage.js":        &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
+		"build/libapps/libdot/js/lib_storage_local.js":  &jsDependencies{[]string{"build/libapps/libdot/js/lib_storage.js"}, []string{}},
+		"build/libapps/libdot/js/lib_storage_chrome.js": &jsDependencies{[]string{"build/libapps/libdot/js/lib_storage.js"}, []string{"js/chrome_extension_externs.js"}},
 
-		"js/htermwtf.js": &jsDependencies{[]string{
+		"build/libapps/hterm/js/hterm_text_attributes.js": &jsDependencies{[]string{
 			"build/libapps/libdot/js/lib.js",
-			// "build/libapps/libdot/js/lib_colors.js",
-			// "build/libapps/libdot/js/lib_message_manager.js",
-			// "build/libapps/libdot/js/lib_preference_manager.js",
-			// "build/libapps/libdot/js/lib_resource.js",
-			"build/libapps/libdot/js/lib_storage.js",
-			// "build/libapps/libdot/js/lib_storage_chrome.js",
-			"build/libapps/libdot/js/lib_storage_local.js",
-			// "build/libapps/libdot/js/lib_storage_memory.js",
-			// "build/libapps/libdot/js/lib_test_manager.js",
-			"build/libapps/libdot/js/lib_utf8.js",
+			"build/libapps/libdot/js/lib_colors.js",
 			"build/libapps/libdot/js/lib_wc.js",
+			"build/libapps/hterm/js/hterm.js",
 		}, []string{}},
+
+		// "build/libapps/hterm/js/hterm_screen.js": &jsDependencies{[]string{
+		// 	"build/libapps/hterm/js/hterm.js",
+		// 	"build/libapps/hterm/js/hterm_text_attributes.js",
+		// }, []string{}},
+
+		"build/libapps/hterm/js/hterm_preference_manager.js": &jsDependencies{[]string{
+			"build/libapps/hterm/js/hterm.js",
+			"build/libapps/libdot/js/lib_preference_manager.js",
+		}, []string{}},
+
+		"build/libapps/hterm/js/hterm.js": &jsDependencies{[]string{
+			"build/libapps/libdot/js/lib.js",
+			"build/libapps/libdot/js/lib_storage_chrome.js",
+			"build/libapps/libdot/js/lib_storage_local.js"}, []string{"js/chrome_extension_externs.js"}},
+
+		// "build/libapps/hterm/js/hterm_terminal.js": &jsDependencies{[]string{
+		// 	"build/libapps/hterm/js/hterm.js",
+		// 	"build/libapps/hterm/js/hterm_text_attributes.js",
+		// 	"build/libapps/hterm/js/hterm_preference_manager.js",
+		// 	"build/libapps/hterm/js/hterm_screen.js",
+		// 	"build/libapps/libdot/js/lib.js",
+		// 	"build/libapps/libdot/js/lib_colors.js",
+		// 	"build/libapps/libdot/js/lib_wc.js",
+		// 	"build/libapps/libdot/js/lib_resource.js",
+		// }, []string{}},
 	}
 
 	jsFlattenedDeps := jsTransitiveDependencies(jsFiles)
