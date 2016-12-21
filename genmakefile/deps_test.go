@@ -1,4 +1,4 @@
-package deps
+package main
 
 import (
 	"reflect"
@@ -77,8 +77,8 @@ func TestTransitiveComplex(t *testing.T) {
 
 	graph := NewGraph(g3)
 	out := graph.Dependencies("10")
-	// I think this is not unique, so I expect this will fail at some point
-	expected := []string{"50", "38", "22", "41", "31", "32", "21", "10"}
+	// this is not unique, so I expect this will fail at some point
+	expected := []string{"50", "38", "22", "41", "32", "31", "21", "10"}
 	if !reflect.DeepEqual(out, expected) {
 		t.Error(out, expected)
 	}

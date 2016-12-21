@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"strings"
-
-	"github.com/evanj/webconsole/deps"
 )
 
 // For flag docs see:
@@ -150,7 +148,7 @@ func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*js
 		jsDeps[file] = dependencies.imports
 	}
 
-	graph := deps.NewGraph(jsDeps)
+	graph := NewGraph(jsDeps)
 
 	out := map[string]*jsDependencies{}
 	for file := range jsFiles {
@@ -183,64 +181,19 @@ func main() {
 			[]string{"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps"}},
 		&staticTarget{closureJAR, []string{},
 			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvf - -C " + buildOutputDir + " *.jar"}},
-		&staticTarget{"hterm_all.js", []string{closureJARPath, buildOutput("libapps")},
+		&staticTarget{"js/hterm_all.js", []string{closureJARPath, buildOutput("libapps")},
 			[]string{"LIBDOT_SEARCH_PATH=$(pwd) build/libapps/libdot/bin/concat.sh -i build/libapps/hterm/concat/hterm_all.concat -o build/hterm_all.js"}},
 	}
 
 	jsFiles := map[string]*jsDependencies{
-		"js/consolechannel.js": &jsDependencies{[]string{}, []string{"js/node_externs.js"}},
-
-		// "js/webconsole_demo.js": &jsDependencies{[]string{
-		// 	"js/consolechannel.js",
-		// 	"build/libapps/hterm/js/hterm_terminal.js",
-		// 	"build/libapps/libdot/js/lib_storage_memory.js"}, []string{}},
+		"js/consolechannel.js": &jsDependencies{
+			[]string{}, []string{"js/node_externs.js", "js/hterm_externs.js"}},
 
 		"js/webconsole_demo.js": &jsDependencies{[]string{
 			"js/consolechannel.js"}, []string{"js/hterm_externs.js"}},
 
-		"__tests__/consolechannel-test.js": &jsDependencies{[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js"}},
-
-		"build/libapps/libdot/js/lib_f.js":              &jsDependencies{[]string{}, []string{"js/chrome_extension_externs.js"}},
-		"build/libapps/libdot/js/lib.js":                &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_colors.js":         &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_utf8.js":           &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_wc.js":             &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_storage.js":        &jsDependencies{[]string{"build/libapps/libdot/js/lib_f.js"}, []string{}},
-		"build/libapps/libdot/js/lib_storage_local.js":  &jsDependencies{[]string{"build/libapps/libdot/js/lib_storage.js"}, []string{}},
-		"build/libapps/libdot/js/lib_storage_chrome.js": &jsDependencies{[]string{"build/libapps/libdot/js/lib_storage.js"}, []string{"js/chrome_extension_externs.js"}},
-
-		"build/libapps/hterm/js/hterm_text_attributes.js": &jsDependencies{[]string{
-			"build/libapps/libdot/js/lib.js",
-			"build/libapps/libdot/js/lib_colors.js",
-			"build/libapps/libdot/js/lib_wc.js",
-			"build/libapps/hterm/js/hterm.js",
-		}, []string{}},
-
-		// "build/libapps/hterm/js/hterm_screen.js": &jsDependencies{[]string{
-		// 	"build/libapps/hterm/js/hterm.js",
-		// 	"build/libapps/hterm/js/hterm_text_attributes.js",
-		// }, []string{}},
-
-		"build/libapps/hterm/js/hterm_preference_manager.js": &jsDependencies{[]string{
-			"build/libapps/hterm/js/hterm.js",
-			"build/libapps/libdot/js/lib_preference_manager.js",
-		}, []string{}},
-
-		"build/libapps/hterm/js/hterm.js": &jsDependencies{[]string{
-			"build/libapps/libdot/js/lib.js",
-			"build/libapps/libdot/js/lib_storage_chrome.js",
-			"build/libapps/libdot/js/lib_storage_local.js"}, []string{"js/chrome_extension_externs.js"}},
-
-		// "build/libapps/hterm/js/hterm_terminal.js": &jsDependencies{[]string{
-		// 	"build/libapps/hterm/js/hterm.js",
-		// 	"build/libapps/hterm/js/hterm_text_attributes.js",
-		// 	"build/libapps/hterm/js/hterm_preference_manager.js",
-		// 	"build/libapps/hterm/js/hterm_screen.js",
-		// 	"build/libapps/libdot/js/lib.js",
-		// 	"build/libapps/libdot/js/lib_colors.js",
-		// 	"build/libapps/libdot/js/lib_wc.js",
-		// 	"build/libapps/libdot/js/lib_resource.js",
-		// }, []string{}},
+		"__tests__/consolechannel-test.js": &jsDependencies{
+			[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js"}},
 	}
 
 	jsFlattenedDeps := jsTransitiveDependencies(jsFiles)
