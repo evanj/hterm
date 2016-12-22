@@ -3,10 +3,10 @@
 /** @const */
 var consolechannel = {};
 
-/** @typedef {{session_id: string, data: (string|undefined), extra: !Object<string, string>}} */
-consolechannel.RequestUnion;
+/** @typedef {{data: (string|undefined), columns: (number|undefined), rows: (number|undefined)}} */
+consolechannel.PartialRequest;
 /** @typedef {{data: string}} */
-consolechannel.ReadResponse;
+consolechannel.ResponseUnion;
 
 /** @record */
 consolechannel.Environment = function() {};
@@ -18,11 +18,11 @@ consolechannel.Environment = function() {};
 consolechannel.Environment.prototype.getRandomValues = function(typedArray) {};
 /**
 @param {string} url
-@param {!consolechannel.RequestUnion} struct
+@param {string} requestSerialized
 @param {function(string)} onSuccess
 @param {function()} onError
 */
-consolechannel.Environment.prototype.post = function(url, struct, onSuccess, onError) {};
+consolechannel.Environment.prototype.post = function(url, requestSerialized, onSuccess, onError) {};
 
 /**
 @constructor
@@ -34,7 +34,7 @@ consolechannel.BrowserEnvironment.prototype.getRandomValues = function(typedArra
   return window.crypto.getRandomValues(typedArray);
 };
 /** @override */
-consolechannel.BrowserEnvironment.prototype.post = function(url, struct, onSuccess, onError) {
+consolechannel.BrowserEnvironment.prototype.post = function(url, requestSerialized, onSuccess, onError) {
   var request = new XMLHttpRequest();
 
   function onReadyStateChange() {
@@ -54,8 +54,7 @@ consolechannel.BrowserEnvironment.prototype.post = function(url, struct, onSucce
   // allow cookies for when we eventually get there
   request.withCredentials = true;
 
-  var body = JSON.stringify(struct);
-  request.send(body);
+  request.send(requestSerialized);
 };
 
 
@@ -91,6 +90,41 @@ consolechannel.Channel = function(env, url, extra) {
 };
 
 /**
+@private
+@param {string} path
+@param {!consolechannel.PartialRequest} struct
+@param {function(!consolechannel.ResponseUnion)} onSuccess
+@param {function()} onError
+*/
+consolechannel.Channel.prototype.postStruct_ = function(path, struct, onSuccess, onError) {
+  var jsonDict = {};
+  // common
+  jsonDict["session_id"] = this.session_id_
+  jsonDict["extra"] = this.extra_;
+  // write
+  jsonDict["data"] = struct.data;
+  // setSize
+  jsonDict["columns"] = struct.columns;
+  jsonDict["rows"] = struct.rows;
+  var serialized = JSON.stringify(jsonDict)
+
+  /** @param {string} responseSerialized */
+  var rawOnSucccess = function(responseSerialized) {
+    // convert a raw JSON message to a Closure compiler friendly struct
+    var raw = JSON.parse(responseSerialized);
+    if (typeof raw !== "object") {
+      console.error("unexpected type from server response: " + typeof raw);
+      onError();
+      return
+    }
+    var struct = {data: raw["data"]};
+    onSuccess(struct);
+  }
+
+  this.env_.post(this.url_ + path, serialized, rawOnSucccess, onError);
+};
+
+/**
 Write data to the terminal program/server. Stolen from
 nassh.Stream.GoogleRelay.prototype.asyncOpen_.
 
@@ -120,7 +154,6 @@ consolechannel.Channel.prototype.doSend_ = function(data) {
     throw "data must not be empty";
   }
   this.writePending_ = true;
-  var request = {session_id: this.session_id_, data: data, extra: this.extra_};
 
   var self = this;
   var onSuccess = function() {
@@ -129,7 +162,9 @@ consolechannel.Channel.prototype.doSend_ = function(data) {
   var onError = function() {
     self.onWriteComplete_(false);
   };
-  this.env_.post(this.url_ + "write", request, onSuccess, onError);
+
+  var request = {data: data};
+  this.postStruct_("write", request, onSuccess, onError);
 };
 
 /**
@@ -168,12 +203,10 @@ consolechannel.Channel.prototype.setSize = function(columns, rows) {
   }
 
   var request = {
-    session_id: this.session_id_,
-    extra: this.extra_,
     columns: columns,
     rows: rows
   };
-  this.env_.post(this.url_ + "setSize", request, onSuccess, onError);
+  this.postStruct_("setSize", request, onSuccess, onError);
 };
 
 /**
@@ -190,19 +223,15 @@ consolechannel.Channel.prototype.startRead = function(io) {
     console.error("read onError");
   }
 
-  function onSuccess(response) {
-    var struct = /** @type {consolechannel.ReadResponse} */ (JSON.parse(response));
+  /** @param {!consolechannel.ResponseUnion} struct */
+  function onSuccess(struct) {
     console.log("read success; length:", struct.data.length);
     io.writeUTF16(struct.data);
     // read again!
     self.startRead(io);
   }
 
-  var request = {
-    session_id: this.session_id_,
-    extra: this.extra_
-  };
-  this.env_.post(this.url_ +"read", request, onSuccess, onError);
+  this.postStruct_("read", {}, onSuccess, onError)
 };
 
 // export in order to be required by node

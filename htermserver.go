@@ -18,6 +18,8 @@ import (
 	"github.com/kr/pty"
 )
 
+var jsonEmptyObject = []byte("{}")
+
 // SessionFactory creates a new session with extraParams. It returns an io.ReadWriteCloser that
 // produces and consumes terminal input and output, or an error.
 type SessionFactory func(extraParams map[string]string) (io.ReadWriteCloser, error)
@@ -143,6 +145,7 @@ func (s *server) writeHandler(w http.ResponseWriter, r *http.Request,
 		return err
 	}
 	log.Printf("writeHandler: wrote %d bytes", n)
+	w.Write(jsonEmptyObject)
 	return nil
 }
 
@@ -154,7 +157,12 @@ func (s *server) setSizeHandler(w http.ResponseWriter, r *http.Request,
 	}
 
 	log.Printf("setSize %d %d", request.Columns, request.Rows)
-	return setSize(session.pty, request.Columns, request.Rows)
+	err := setSize(session.pty, request.Columns, request.Rows)
+	if err != nil {
+		return err
+	}
+	w.Write(jsonEmptyObject)
+	return nil
 }
 
 func (s *server) readHandler(w http.ResponseWriter, r *http.Request,

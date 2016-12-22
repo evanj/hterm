@@ -114,9 +114,19 @@ hterm.defaultStorage;
 
 /**
 @constructor
+@struct
 @param {string=} opt_profileId
 */
 hterm.Terminal = function(opt_profileId) {};
+
+/**
+ * Clients should override this to be notified when the terminal is ready
+ * for use.
+ *
+ * The terminal initialization is asynchronous, and shouldn't be used before
+ * this method is called.
+ */
+hterm.Terminal.prototype.onTerminalReady = function() {};
 
 /** @type {!hterm.Terminal.IO} */
 hterm.Terminal.prototype.io;
@@ -160,6 +170,7 @@ hterm.Terminal.prototype.installKeyboard = function() {};
 
 /**
 @constructor
+@struct
 @param {hterm.Terminal} terminal
 */
 hterm.Terminal.IO = function(terminal) {};
@@ -169,3 +180,44 @@ hterm.Terminal.IO = function(terminal) {};
  * @param {string} string The string to print.
  */
 hterm.Terminal.IO.prototype.writeUTF16 = function(string) {};
+
+/**
+ * Create a new hterm.Terminal.IO instance and make it active on the Terminal
+ * object associated with this instance.
+ *
+ * This is used to pass control of the terminal IO off to a subcommand.  The
+ * IO.pop() method can be used to restore control when the subcommand completes.
+ * @return {!hterm.Terminal.IO}
+ */
+hterm.Terminal.IO.prototype.push = function() {}
+
+/**
+ * Called when a terminal keystroke is detected.
+ *
+ * Clients should override this to receive notification of keystrokes.
+ *
+ * The keystroke data will be encoded according to the 'send-encoding'
+ * preference.
+ *
+ * @param {string} string The VT key sequence.
+ */
+ hterm.Terminal.IO.prototype.onVTKeystroke = function(string) {}
+
+ /**
+ * Called when data needs to be sent to the current command.
+ *
+ * Clients should override this to receive notification of pending data.
+ *
+ * @param {string} string The data to send.
+ */
+hterm.Terminal.IO.prototype.sendString = function(string) {}
+
+/**
+ * Called when terminal size is changed.
+ *
+ * Clients should override this to receive notification of resize.
+ *
+ * @param {number} width terminal width.
+ * @param {number} height terminal height.
+ */
+hterm.Terminal.IO.prototype.onTerminalResize = function(width, height) {}
