@@ -3,18 +3,24 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"github.com/kr/pty"
 )
+
+// SessionFactory creates a new session with extraParams. It returns an io.ReadWriteCloser that
+// produces and consumes terminal input and output, or an error.
+type SessionFactory func(extraParams map[string]string) (io.ReadWriteCloser, error)
 
 type sessionState struct {
 	id  string
@@ -22,22 +28,21 @@ type sessionState struct {
 }
 
 type server struct {
+	mu           sync.Mutex
 	sessions     map[string]*sessionState
 	startCommand []string
 }
 
-type requestBase struct {
-	SessionId string `json:"session_id"`
-	Query     string `json:"query"`
-}
+// Union for write, read, and setSize requests
+type requestUnion struct {
+	// common parameters
+	SessionId string            `json:"session_id"`
+	Extra     map[string]string `json:"extra"`
 
-type writeRequest struct {
-	requestBase
+	// write
 	Data string `json:"data"`
-}
 
-type setSizeRequest struct {
-	requestBase
+	// setSize
 	Columns int `json:"columns"`
 	Rows    int `json:"rows"`
 }
@@ -47,9 +52,8 @@ type readResponse struct {
 }
 
 type customHandler func(w http.ResponseWriter, r *http.Request,
-	session *sessionState, data []byte) error
+	session *sessionState, req *requestUnion) error
 
-// TODO: Requires synchronization
 func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := func() error {
@@ -57,7 +61,7 @@ func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 				return fmt.Errorf("invalid method %s", r.Method)
 			}
 			data, err := ioutil.ReadAll(r.Body)
-			log.Println("WTF???", string(data))
+			log.Printf("sessionWrapper read message: %s", string(data))
 			err2 := r.Body.Close()
 			if err != nil {
 				return err
@@ -65,8 +69,9 @@ func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 			if err2 != nil {
 				return err2
 			}
-			// json decode just the session
-			req := &requestBase{}
+
+			// json decode the request
+			req := &requestUnion{}
 			err = json.Unmarshal(data, req)
 			if err != nil {
 				return err
@@ -76,41 +81,47 @@ func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 				return errors.New("required field session_id is missing")
 			}
 
+			s.mu.Lock()
 			session := s.sessions[req.SessionId]
+			s.mu.Unlock()
+
 			if session == nil {
-				log.Printf("starting new session %s", req.SessionId)
+				log.Printf("creating new session id %s", req.SessionId)
 				session = &sessionState{id: req.SessionId}
 
 				startCommand := s.startCommand
-				if req.Query != "" {
-					values, err := url.ParseQuery(req.Query)
-					if err != nil {
-						return err
-					}
-					if values.Get("instance") == "" {
-						return errors.New("instance parameter is required")
-					}
-					instance := values.Get("instance")
-					user := "root"
-					if values.Get("user") != "" {
-						user = values.Get("user")
-					}
+				// if req. != "" {
+				// 	values, err := url.ParseQuery(req.Query)
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	if values.Get("instance") == "" {
+				// 		return errors.New("instance parameter is required")
+				// 	}
+				// 	instance := values.Get("instance")
+				// 	user := "root"
+				// 	if values.Get("user") != "" {
+				// 		user = values.Get("user")
+				// 	}
 
-					startCommand = []string{
-						"mysql", "--socket=/cloudsql/" + instance, "--user=" + user, "--password"}
-				}
+				// 	startCommand = []string{
+				// 		"mysql", "--socket=/cloudsql/" + instance, "--user=" + user, "--password"}
+				// }
 
 				cmd := exec.Command(startCommand[0], startCommand[1:]...)
 				session.pty, err = pty.Start(cmd)
 				if err != nil {
 					return err
 				}
+
+				s.mu.Lock()
 				s.sessions[req.SessionId] = session
+				s.mu.Unlock()
 			}
 
-			// pass on the request
+			// pass on the request to the real handler
 			log.Printf("%s session %s", r.URL.Path, session.id)
-			return h(w, r, session, data)
+			return h(w, r, session, req)
 		}()
 		if err != nil {
 			log.Printf("Error: %s: %s", r.URL.Path, err.Error())
@@ -119,30 +130,14 @@ func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 	}
 }
 
-// func rootHandler(w http.ResponseWriter, r *http.Request) {
-// 	log.Printf("rootHandler %s", r.URL.Path)
-// 	if r.URL.Path != "/" {
-// 		http.NotFound(w, r)
-// 		return
-// 	}
-// 	w.Header().Set("Content-Type", "text/plain;charset=utf-8")
-// 	w.Write([]byte("hello root"))
-// }
-
 func (s *server) writeHandler(w http.ResponseWriter, r *http.Request,
-	session *sessionState, data []byte) error {
-	request := &writeRequest{}
-	err := json.Unmarshal(data, request)
-	if err != nil {
-		return err
-	}
+	session *sessionState, request *requestUnion) error {
 
 	if request.Data == "" {
-		return errors.New("missing required field data")
+		return errors.New("write request missing required data")
 	}
 
-	log.Printf("received %s\n", request.Data)
-	// TODO: figure out how to transform this to the appropriate format
+	log.Printf("writeHandler data: %s\n", request.Data)
 	n, err := session.pty.Write([]byte(request.Data))
 	if err != nil {
 		return err
@@ -152,27 +147,18 @@ func (s *server) writeHandler(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *server) setSizeHandler(w http.ResponseWriter, r *http.Request,
-	session *sessionState, data []byte) error {
-	request := &setSizeRequest{}
-	err := json.Unmarshal(data, request)
-	if err != nil {
-		return err
-	}
+	session *sessionState, request *requestUnion) error {
 
 	if request.Columns <= 0 || request.Rows <= 0 {
 		return fmt.Errorf("invalid columns/rows: %d/%d", request.Columns, request.Rows)
 	}
 
 	log.Printf("setSize %d %d", request.Columns, request.Rows)
-	err = setSize(session.pty, request.Columns, request.Rows)
-	if err != nil {
-		return err
-	}
-	return nil
+	return setSize(session.pty, request.Columns, request.Rows)
 }
 
 func (s *server) readHandler(w http.ResponseWriter, r *http.Request,
-	session *sessionState, data []byte) error {
+	session *sessionState, request *requestUnion) error {
 	// TODO: reuse buffer; loop appropriately
 	buffer := make([]byte, 4096)
 	n, err := session.pty.Read(buffer)
@@ -197,21 +183,23 @@ func (s *server) readHandler(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-func main() {
-	// start a subprocess
-	s := &server{sessions: make(map[string]*sessionState)}
-	// s.startCommand = []string("mysql", "--user=root", "--socket=/tmp/triggeredmail:us-central1:statpoller", "costs")
-	s.startCommand = []string{"bash"}
+func startSubprocess(command []string) (io.ReadWriteCloser, error) {
+	cmd := exec.Command(command[0], command[1:]...)
+	return pty.Start(cmd)
+}
 
-	staticHandler := http.FileServer(http.Dir("static"))
+func main() {
+	addr := flag.String("addr", "localhost:8080", "Socket address to listen on e.g. :8080 for global")
+	s := &server{sync.Mutex{}, make(map[string]*sessionState), []string{"bash"}}
+
+	staticHandler := http.FileServer(http.Dir("build/js"))
 	http.Handle("/", staticHandler)
 	http.HandleFunc("/write", s.sessionWrapper(s.writeHandler))
 	http.HandleFunc("/read", s.sessionWrapper(s.readHandler))
 	http.HandleFunc("/setSize", s.sessionWrapper(s.setSizeHandler))
 
-	const listenHostPort = ":8080"
-	fmt.Printf("Listening on http://%s/\n", listenHostPort)
-	err := http.ListenAndServe(listenHostPort, nil)
+	fmt.Printf("Listening on http://%s/\n", *addr)
+	err := http.ListenAndServe(*addr, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -182,18 +182,20 @@ func main() {
 		&staticTarget{closureJAR, []string{},
 			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvf - -C " + buildOutputDir + " *.jar"}},
 		&staticTarget{"js/hterm_all.js", []string{closureJARPath, buildOutput("libapps")},
-			[]string{"LIBDOT_SEARCH_PATH=$(pwd) build/libapps/libdot/bin/concat.sh -i build/libapps/hterm/concat/hterm_all.concat -o build/hterm_all.js"}},
+			[]string{"LIBDOT_SEARCH_PATH=$(pwd) build/libapps/libdot/bin/concat.sh -i build/libapps/hterm/concat/hterm_all.concat -o $@"}},
+		&staticTarget{"js/index.html", []string{"index.html"},
+			[]string{"cp $^ $@"}},
 	}
 
 	jsFiles := map[string]*jsDependencies{
-		"js/consolechannel.js": &jsDependencies{
-			[]string{}, []string{"js/node_externs.js", "js/hterm_externs.js"}},
+		// "js/consolechannel.js": &jsDependencies{
+		// 	[]string{}, []string{"js/node_externs.js", "js/hterm_externs.js"}},
 
 		"js/webconsole_demo.js": &jsDependencies{[]string{
-			"js/consolechannel.js"}, []string{"js/hterm_externs.js"}},
+			"js/consolechannel.js"}, []string{"js/hterm_externs.js", "js/node_externs.js"}},
 
 		"__tests__/consolechannel-test.js": &jsDependencies{
-			[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js"}},
+			[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js", "js/node_externs.js", "js/hterm_externs.js"}},
 	}
 
 	jsFlattenedDeps := jsTransitiveDependencies(jsFiles)

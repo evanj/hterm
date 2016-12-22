@@ -3,8 +3,8 @@
 /** @const */
 var consolechannel = {};
 
-/** @typedef {{session_id: string, data: string, extra: !Object}} */
-consolechannel.WriteRequest;
+/** @typedef {{session_id: string, data: (string|undefined), extra: !Object<string, string>}} */
+consolechannel.RequestUnion;
 /** @typedef {{data: string}} */
 consolechannel.ReadResponse;
 
@@ -18,8 +18,8 @@ consolechannel.Environment = function() {};
 consolechannel.Environment.prototype.getRandomValues = function(typedArray) {};
 /**
 @param {string} url
-@param {!Object} struct
-@param {function()} onSuccess
+@param {!consolechannel.RequestUnion} struct
+@param {function(string)} onSuccess
 @param {function()} onError
 */
 consolechannel.Environment.prototype.post = function(url, struct, onSuccess, onError) {};
@@ -45,8 +45,9 @@ consolechannel.BrowserEnvironment.prototype.post = function(url, struct, onSucce
       onError();
       return;
     }
+
     console.log("write success");
-    onSuccess();
+    onSuccess(request.responseText);
   }
   request.onreadystatechange = onReadyStateChange;
   request.open("POST", url, true);
@@ -63,15 +64,15 @@ consolechannel.BrowserEnvironment.prototype.post = function(url, struct, onSucce
 @struct
 @param {!consolechannel.Environment} env
 @param {string} url
-@param {!Object} extraParams
+@param {!Object<string, string>} extra
 */
-consolechannel.Channel = function(env, url, extraParams) {
+consolechannel.Channel = function(env, url, extra) {
   /** @type {!consolechannel.Environment} */
   this.env_ = env;
   /** @type {string} */
   this.url_ = url;
-  /** @type {!Object} */
-  this.extraParams_ = extraParams;
+  /** @type {!Object<string, string>} */
+  this.extra_ = extra;
 
   // generate a 32-byte unique random id as a base64-encoded string
   var array = new Uint8Array(32);
@@ -119,7 +120,7 @@ consolechannel.Channel.prototype.doSend_ = function(data) {
     throw "data must not be empty";
   }
   this.writePending_ = true;
-  var request = {session_id: this.session_id_, data: data, extra: this.extraParams_};
+  var request = {session_id: this.session_id_, data: data, extra: this.extra_};
 
   var self = this;
   var onSuccess = function() {
@@ -128,7 +129,7 @@ consolechannel.Channel.prototype.doSend_ = function(data) {
   var onError = function() {
     self.onWriteComplete_(false);
   };
-  this.env_.post(this.url_, request, onSuccess, onError);
+  this.env_.post(this.url_ + "write", request, onSuccess, onError);
 };
 
 /**
@@ -152,75 +153,57 @@ consolechannel.Channel.prototype.onWriteComplete_ = function(success) {
   }
 };
 
-// /**
-// Sets the terminal size to rows, cols.
-// @param {number} columns
-// @param {number} rows
-// */
-// consolechannel.Channel.prototype.setSize = function(columns, rows) {
-//   var sizeRequest = new XMLHttpRequest();
+/**
+Sets the terminal size to rows, cols.
+@param {number} columns
+@param {number} rows
+*/
+consolechannel.Channel.prototype.setSize = function(columns, rows) {
+  function onError() {
+    console.error("setSize onError");
+  }
 
-//   function onError() {
-//     console.error("setSize onError");
-//   }
+  function onSuccess() {
+    console.log("setSize success");
+  }
 
-//   function onReady() {
-//     if (sizeRequest.readyState != XMLHttpRequest.DONE) {
-//       return;
-//     }
-//     if (sizeRequest.status != 200) {
-//       return onError();
-//     }
-//     console.log("setSize success");
-//   }
-//   sizeRequest.open("POST", this.url_ + "setSize", true);
-//   sizeRequest.withCredentials = true;  // allow cookies for when we eventually get there?
-//   sizeRequest.onabort = sizeRequest.ontimeout = sizeRequest.onerror = onError;
-//   sizeRequest.onloadend = onReady;
+  var request = {
+    session_id: this.session_id_,
+    extra: this.extra_,
+    columns: columns,
+    rows: rows
+  };
+  this.env_.post(this.url_ + "setSize", request, onSuccess, onError);
+};
 
-//   var request = JSON.stringify({session_id: this.session_id_, columns: columns, rows: rows});
-//   sizeRequest.send(request);
-// };
+/**
+Start reading data that should be written to io.
+@param {!hterm.Terminal.IO} io
+*/
+consolechannel.Channel.prototype.startRead = function(io) {
+  // if (typeof io === "undefined" || typeof io.writeUTF16 === undefined) {
+  //   throw "Channel.startRead: io.writeUTF16 must be defined";
+  // }
+  var self = this;
 
-// /**
-// Start reading data that should be written to io.
-// @param {!hterm.Terminal.IO} io
-// */
-// consolechannel.Channel.prototype.startRead = function(io) {
-//   // if (typeof io === "undefined" || typeof io.writeUTF16 === undefined) {
-//   //   throw "Channel.startRead: io.writeUTF16 must be defined";
-//   // }
-//   var self = this;
-//   var readRequest = new XMLHttpRequest();
+  function onError() {
+    console.error("read onError");
+  }
 
-//   function onError() {
-//     console.error("read onError");
-//   }
+  function onSuccess(response) {
+    var struct = /** @type {consolechannel.ReadResponse} */ (JSON.parse(response));
+    console.log("read success; length:", struct.data.length);
+    io.writeUTF16(struct.data);
+    // read again!
+    self.startRead(io);
+  }
 
-//   function onReady() {
-//     if (readRequest.readyState != XMLHttpRequest.DONE) {
-//       return;
-//     }
-//     if (readRequest.status != 200) {
-//       return onError();
-//     }
-
-//     var response = /** @type {consolechannel.ReadResponse} */ (JSON.parse(readRequest.responseText));
-//     console.log("read success; length:", response.data.length);
-//     io.writeUTF16(response.data);
-//     // read again!
-//     self.startRead(io);
-//   }
-//   readRequest.open("POST", this.url_ + "read", true);
-//   readRequest.withCredentials = true;  // allow cookies for when we eventually get there?
-//   readRequest.onabort = readRequest.ontimeout = readRequest.onerror = onError;
-//   readRequest.onloadend = onReady;
-//   var request = JSON.stringify({
-//     session_id: this.session_id_,
-//     query: this.query_
-//   });
-//   readRequest.send(request);
-// };
+  var request = {
+    session_id: this.session_id_,
+    extra: this.extra_
+  };
+  this.env_.post(this.url_ +"read", request, onSuccess, onError);
+};
 
 // export in order to be required by node
 if (typeof module !== "undefined" && module.exports) {
