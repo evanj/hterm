@@ -8,7 +8,7 @@ import (
 // For flag docs see:
 // https://github.com/google/closure-compiler/wiki/Using-NTI-(new-type-inference)
 // need to
-const closureVersion = "20161024"
+const closureVersion = "20161201"
 const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
 const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict " +
