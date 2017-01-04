@@ -1,9 +1,8 @@
-package main
+package hterm
 
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -20,19 +19,41 @@ import (
 
 var jsonEmptyObject = []byte("{}")
 
-// SessionFactory creates a new session with extraParams. It returns an io.ReadWriteCloser that
-// produces and consumes terminal input and output, or an error.
-type SessionFactory func(extraParams map[string]string) (io.ReadWriteCloser, error)
+// SessionStarter creates a new session when Start is called.
+type SessionStarter interface {
+	// Start creates a new session with extraParams. The stream that is returned must produce
+	// terminal output and consume it. It will be closed when the session is terminated or when
+	// it times out.
+	Start(extraParams map[string]string) (*os.File, error)
+}
+
+type subprocessStarter struct {
+	command []string
+}
+
+// NewSubprocessStarter returns a SessionStarter that forks new subprocesses.
+func NewSubprocessStarter(command []string) SessionStarter {
+	return &subprocessStarter{command}
+}
+
+func (s *subprocessStarter) Start(extraParams map[string]string) (*os.File, error) {
+	cmd := exec.Command(s.command[0], s.command[1:]...)
+	return pty.Start(cmd)
+}
 
 type sessionState struct {
 	id  string
 	pty *os.File
 }
 
-type server struct {
-	mu           sync.Mutex
-	sessions     map[string]*sessionState
-	startCommand []string
+type Server struct {
+	mu       sync.Mutex
+	sessions map[string]*sessionState
+	starter  SessionStarter
+}
+
+func NewServer(starter SessionStarter) *Server {
+	return &Server{sync.Mutex{}, map[string]*sessionState{}, starter}
 }
 
 // Union for write, read, and setSize requests
@@ -56,7 +77,7 @@ type readResponse struct {
 type customHandler func(w http.ResponseWriter, r *http.Request,
 	session *sessionState, req *requestUnion) error
 
-func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
+func (s *Server) sessionWrapper(h customHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := func() error {
 			if r.Method != http.MethodPost {
@@ -91,27 +112,7 @@ func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 				log.Printf("creating new session id %s", req.SessionId)
 				session = &sessionState{id: req.SessionId}
 
-				startCommand := s.startCommand
-				// if req. != "" {
-				// 	values, err := url.ParseQuery(req.Query)
-				// 	if err != nil {
-				// 		return err
-				// 	}
-				// 	if values.Get("instance") == "" {
-				// 		return errors.New("instance parameter is required")
-				// 	}
-				// 	instance := values.Get("instance")
-				// 	user := "root"
-				// 	if values.Get("user") != "" {
-				// 		user = values.Get("user")
-				// 	}
-
-				// 	startCommand = []string{
-				// 		"mysql", "--socket=/cloudsql/" + instance, "--user=" + user, "--password"}
-				// }
-
-				cmd := exec.Command(startCommand[0], startCommand[1:]...)
-				session.pty, err = pty.Start(cmd)
+				session.pty, err = s.starter.Start(req.Extra)
 				if err != nil {
 					return err
 				}
@@ -132,7 +133,7 @@ func (s *server) sessionWrapper(h customHandler) http.HandlerFunc {
 	}
 }
 
-func (s *server) writeHandler(w http.ResponseWriter, r *http.Request,
+func (s *Server) writeHandler(w http.ResponseWriter, r *http.Request,
 	session *sessionState, request *requestUnion) error {
 
 	if request.Data == "" {
@@ -149,7 +150,7 @@ func (s *server) writeHandler(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-func (s *server) setSizeHandler(w http.ResponseWriter, r *http.Request,
+func (s *Server) setSizeHandler(w http.ResponseWriter, r *http.Request,
 	session *sessionState, request *requestUnion) error {
 
 	if request.Columns <= 0 || request.Rows <= 0 {
@@ -165,52 +166,34 @@ func (s *server) setSizeHandler(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-func (s *server) readHandler(w http.ResponseWriter, r *http.Request,
+func (s *Server) readHandler(w http.ResponseWriter, r *http.Request,
 	session *sessionState, request *requestUnion) error {
-	// TODO: reuse buffer; loop appropriately
+	// TODO: reuse buffer?
 	buffer := make([]byte, 4096)
 	n, err := session.pty.Read(buffer)
-	if err != nil {
-		return err
-	}
-	if n == len(buffer) {
-		panic("filled the buffer TODO: implement")
-	}
-	if n <= 0 {
-		panic("WTF n <= 0")
-	}
-	log.Printf("readHandler: read %d bytes", n)
+	if n > 0 {
+		// handle any bytes read before any errors
+		// TODO: this assumes calling Read again will return the error again
+		log.Printf("readHandler: read %d bytes", n)
 
-	// assume we can just convert this to UTF-8; TODO: how to handle escapes?
-	resp := &readResponse{string(buffer[:n])}
-	encoder := json.NewEncoder(w)
-	err = encoder.Encode(resp)
-	if err != nil {
-		return err
+		// assume we can just convert this to UTF-8; TODO: how to handle escapes?
+		resp := &readResponse{string(buffer[:n])}
+		encoder := json.NewEncoder(w)
+		return encoder.Encode(resp)
 	}
-	return nil
+	if err == io.EOF {
+		log.Printf("readHandler: pty.Read returned EOF; session %s finished", session.id)
+	}
+	return err
 }
 
-func startSubprocess(command []string) (io.ReadWriteCloser, error) {
-	cmd := exec.Command(command[0], command[1:]...)
-	return pty.Start(cmd)
-}
-
-func main() {
-	addr := flag.String("addr", "localhost:8080", "Socket address to listen on e.g. :8080 for global")
-	s := &server{sync.Mutex{}, make(map[string]*sessionState), []string{"bash"}}
-
-	staticHandler := http.FileServer(http.Dir("build/js"))
-	http.Handle("/", staticHandler)
-	http.HandleFunc("/write", s.sessionWrapper(s.writeHandler))
-	http.HandleFunc("/read", s.sessionWrapper(s.readHandler))
-	http.HandleFunc("/setSize", s.sessionWrapper(s.setSizeHandler))
-
-	fmt.Printf("Listening on http://%s/\n", *addr)
-	err := http.ListenAndServe(*addr, nil)
-	if err != nil {
-		panic(err)
+func (s *Server) RegisterHandlers(path string, mux *http.ServeMux) {
+	if len(path) == 0 || path[len(path)-1] != '/' {
+		panic("path must end with /")
 	}
+	mux.HandleFunc(path+"write", s.sessionWrapper(s.writeHandler))
+	mux.HandleFunc(path+"read", s.sessionWrapper(s.readHandler))
+	mux.HandleFunc(path+"setSize", s.sessionWrapper(s.setSizeHandler))
 }
 
 // Setsize resizes pty t to s.
