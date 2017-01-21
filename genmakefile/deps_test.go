@@ -78,9 +78,27 @@ func TestTransitiveComplex(t *testing.T) {
 	graph := NewGraph(g3)
 	out := graph.Dependencies("10")
 	// this is not unique, so I expect this will fail at some point
-	expected := []string{"50", "38", "22", "41", "32", "31", "21", "10"}
+	expected := []string{"38", "50", "22", "41", "32", "31", "21", "10"}
 	if !reflect.DeepEqual(out, expected) {
 		t.Error(out, expected)
+	}
+}
+
+func TestTopologicalDeterministic(t *testing.T) {
+	g := map[string][]string{
+		// 10 -> 21 22
+		"10": []string{"21", "22"},
+		"50": []string{"61", "62"},
+		// "10": []string{"21", "22", "23", "24"},
+	}
+
+	// output must be deterministic so generated output does not change
+	expected := []string{"10", "50", "21", "22", "61", "62"}
+	for i := 0; i < 30; i++ {
+		out := topologicalSort(g)
+		if !reflect.DeepEqual(out, expected) {
+			t.Error("Results should be deterministic:", out, expected)
+		}
 	}
 }
 

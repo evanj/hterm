@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -177,6 +178,8 @@ func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*js
 		for extern := range externsSet {
 			externs = append(externs, extern)
 		}
+		// sort the externs to make them deterministic
+		sort.Strings(externs)
 
 		// exclude the file itself as a dependency
 		out[file] = &jsDependencies{transitiveDeps[:len(transitiveDeps)-1], externs}
@@ -216,14 +219,23 @@ func main() {
 	jsFlattenedDeps := jsTransitiveDependencies(jsFiles)
 	jsInputs := []string{}
 	jsCompiledTests := []string{}
-	for inputPath, deps := range jsFlattenedDeps {
+
+	// sort js targets by path names to make it deterministic
+	jsPaths := []string{}
+	for jsPath, _ := range jsFlattenedDeps {
+		jsPaths = append(jsPaths, jsPath)
+	}
+	sort.Strings(jsPaths)
+
+	for _, jsPath := range jsPaths {
+		deps := jsFlattenedDeps[jsPath]
 		// compile each file individually: ensures the dependencies are correct
-		jsTarget := &jsModule{inputPath, deps.imports, deps.externs}
+		jsTarget := &jsModule{jsPath, deps.imports, deps.externs}
 		targets = append(targets, jsTarget)
 
 		// flatten the map to a lists for other targets
-		jsInputs = append(jsInputs, inputPath)
-		if strings.HasPrefix(inputPath, jsTestPrefix) {
+		jsInputs = append(jsInputs, jsPath)
+		if strings.HasPrefix(jsPath, jsTestPrefix) {
 			jsCompiledTests = append(jsCompiledTests, jsTarget.output())
 		}
 	}

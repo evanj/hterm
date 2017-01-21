@@ -175,17 +175,27 @@ func topologicalSort(outgoingEdges map[string][]string) []string {
 
 	output := []string{}
 	for !noIncoming.isEmpty() {
-		node := noIncoming.pop()
-		output = append(output, node)
+		// everything that currently has no incoming edges has an equal weight:
+		// collect them all and sort by key
+		keys := []string{}
+		for node := range noIncoming.values {
+			keys = append(keys, node)
+		}
+		sort.Strings(keys)
 
-		// remove the edge from all destinations
-		for _, edge := range outgoingEdges[node] {
-			success := incomingEdges[edge].remove(node)
-			if !success {
-				panic("mismatch between incoming and outgoing edges")
-			}
-			if incomingEdges[edge].isEmpty() {
-				noIncoming.add(edge)
+		for _, node := range keys {
+			noIncoming.remove(node)
+			output = append(output, node)
+
+			// remove the edge from all destinations
+			for _, edge := range outgoingEdges[node] {
+				success := incomingEdges[edge].remove(node)
+				if !success {
+					panic("mismatch between incoming and outgoing edges")
+				}
+				if incomingEdges[edge].isEmpty() {
+					noIncoming.add(edge)
+				}
 			}
 		}
 	}
