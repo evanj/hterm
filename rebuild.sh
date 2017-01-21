@@ -12,7 +12,8 @@ npm install
 echo "running make"
 make
 
-echo "running go generate"
+echo "running go get esc / go generate"
+go get github.com/mjibson/esc
 go generate -x ./...
 
 echo "NOTE: 'rm -rf build node_modules' to be really clean"
