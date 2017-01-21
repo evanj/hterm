@@ -190,7 +190,13 @@ func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*js
 func main() {
 	targets := []target{
 		&staticTarget{"libapps", []string{}, []string{},
-			[]string{"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps"}},
+			[]string{
+				"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps",
+				// make the build deterministic:
+				// libdot's concat uses the current date; instead use the date of the last commit
+				"sed -i='' \"s/date -u '+%a, %d %b %Y %T %z'/git log -1 --format=%cd/\" build/libapps/hterm/concat/hterm_resources.concat",
+			},
+		},
 		&staticTarget{closureJAR, []string{}, []string{},
 			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvfz - -C " + buildOutputDir + " " + closureJAR}},
 		// concat.sh fails if build/js does not exist
