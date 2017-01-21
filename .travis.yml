@@ -1,0 +1,12 @@
+language: go
+
+go:
+  - 1.7.x
+
+install:
+  # Default version of Node is ancient and doesn't support const
+  - nvm install 6
+  - ./rebuild.sh
+
+script:
+  - ./runtests.sh

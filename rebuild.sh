@@ -1,6 +1,10 @@
 #!/bin/bash
+# sets up the development environment and re-generates any generated files
 
 set -euf -o pipefail
+
+echo "go get-ting dependencies"
+go get ./...
 
 echo "generating Makefile"
 go run genmakefile/deps.go genmakefile/genmakefile.go > Makefile

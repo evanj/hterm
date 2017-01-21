@@ -1,4 +1,5 @@
-//go:generate esc -pkg=$GOPACKAGE -o=static.go -prefix=static static
+// we don't care about file modification timestamps but do want deterministic builds
+//go:generate esc -pkg=$GOPACKAGE -o=static.go -prefix=static -modtime=1485035869 static
 package main
 
 import (
