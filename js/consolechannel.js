@@ -16,7 +16,9 @@ consolechannel.Environment = function() {};
 @throws {Error}
 */
 consolechannel.Environment.prototype.getRandomValues = function(typedArray) {};
+
 /**
+Sends an HTTP POST to url with body requestSerialized.
 @param {string} url
 @param {string} requestSerialized
 @param {function(string)} onSuccess
