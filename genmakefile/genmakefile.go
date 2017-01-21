@@ -189,7 +189,7 @@ func main() {
 		&staticTarget{"libapps", []string{}, []string{},
 			[]string{"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps"}},
 		&staticTarget{closureJAR, []string{}, []string{},
-			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvf - -C " + buildOutputDir + " *.jar"}},
+			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvfz - -C " + buildOutputDir + " " + closureJAR}},
 		// concat.sh fails if build/js does not exist
 		&staticTarget{"js", []string{}, []string{},
 			[]string{"mkdir -p $@"}},
