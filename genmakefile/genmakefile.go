@@ -7,7 +7,6 @@ import (
 
 // For flag docs see:
 // https://github.com/google/closure-compiler/wiki/Using-NTI-(new-type-inference)
-// need to
 const closureVersion = "20161201"
 const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
@@ -75,6 +74,7 @@ func buildOutput(name string) string {
 type target interface {
 	output() string
 	inputs() []string
+	orderOnlyDeps() []string
 	commands() []string
 }
 
@@ -102,6 +102,10 @@ func (j *jsModule) inputs() []string {
 	return append(out, closureJARPath)
 }
 
+func (j *jsModule) orderOnlyDeps() []string {
+	return nil
+}
+
 func (j *jsModule) commands() []string {
 	command := "$(CLOSURE_COMPILER) --js_output_file $@ "
 	for _, extern := range j.externs {
@@ -112,9 +116,10 @@ func (j *jsModule) commands() []string {
 }
 
 type staticTarget struct {
-	out  string
-	ins  []string
-	cmds []string
+	out       string
+	ins       []string
+	orderOnly []string
+	cmds      []string
 }
 
 func (s *staticTarget) output() string {
@@ -123,6 +128,10 @@ func (s *staticTarget) output() string {
 
 func (s *staticTarget) inputs() []string {
 	return s.ins
+}
+
+func (s *staticTarget) orderOnlyDeps() []string {
+	return s.orderOnly
 }
 
 func (s *staticTarget) commands() []string {
@@ -177,21 +186,27 @@ func jsTransitiveDependencies(jsFiles map[string]*jsDependencies) map[string]*js
 
 func main() {
 	targets := []target{
-		&staticTarget{"libapps", []string{},
+		&staticTarget{"libapps", []string{}, []string{},
 			[]string{"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps"}},
-		&staticTarget{closureJAR, []string{},
+		&staticTarget{closureJAR, []string{}, []string{},
 			[]string{"curl --location https://dl.google.com/closure-compiler/compiler-" + closureVersion + ".tar.gz | tar xvf - -C " + buildOutputDir + " *.jar"}},
-		&staticTarget{"js/hterm_all.js", []string{closureJARPath, buildOutput("libapps")},
+		// concat.sh fails if build/js does not exist
+		&staticTarget{"js", []string{}, []string{},
+			[]string{"mkdir -p $@"}},
+		&staticTarget{"js/hterm_all.js", []string{closureJARPath, buildOutput("libapps")}, []string{buildOutput("js")},
 			[]string{"LIBDOT_SEARCH_PATH=$(pwd) build/libapps/libdot/bin/concat.sh -i build/libapps/hterm/concat/hterm_all.concat -o $@"}},
-		&staticTarget{"js/index.html", []string{"index.html"},
-			[]string{"cp $^ $@"}},
+
+		// originally I wanted all build outputs in build, but these ones don't work that way
+		// combine all js into a single file
+		&staticTarget{"../cmd/htermshell/static/htermshell.js", []string{buildOutput("js/hterm_all.js"), buildOutput("js/htermshell.js")}, []string{},
+			[]string{"cat $^ > $@"}},
 	}
 
 	jsFiles := map[string]*jsDependencies{
 		// "js/consolechannel.js": &jsDependencies{
 		// 	[]string{}, []string{"js/node_externs.js", "js/hterm_externs.js"}},
 
-		"js/webconsole_demo.js": &jsDependencies{[]string{
+		"js/htermshell.js": &jsDependencies{[]string{
 			"js/consolechannel.js"}, []string{"js/hterm_externs.js", "js/node_externs.js"}},
 
 		"__tests__/consolechannel-test.js": &jsDependencies{
@@ -215,11 +230,11 @@ func main() {
 
 	// run all tests uncompiled: assume they depend on all .js files
 	// TODO: this should be the transitive dependencies of the tests themselves, but whatever
-	targets = append(targets, &staticTarget{"uncompiled_tests.teststamp", jsInputs,
+	targets = append(targets, &staticTarget{"uncompiled_tests.teststamp", jsInputs, []string{},
 		[]string{"npm test", "touch $@"}})
 
 	// run all the compiled tests
-	targets = append(targets, &staticTarget{"compiled_tests.teststamp", jsCompiledTests,
+	targets = append(targets, &staticTarget{"compiled_tests.teststamp", jsCompiledTests, []string{},
 		[]string{jest + ` '--config={"testRegex": "/build/__tests__/"}'`, "touch $@"}})
 
 	allTargets := ""
@@ -230,7 +245,11 @@ func main() {
 		}
 		allTargets += target.output()
 
-		targetOutput += target.output() + ": " + strings.Join(target.inputs(), " ") + "\n"
+		// target name, inputs, then order-only dependencies
+		targetOutput += target.output()
+		targetOutput += ": " + strings.Join(target.inputs(), " ")
+		targetOutput += " | " + strings.Join(target.orderOnlyDeps(), " ") + "\n"
+
 		for _, cmd := range target.commands() {
 			targetOutput += "\t" + cmd + "\n"
 		}
