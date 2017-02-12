@@ -141,11 +141,11 @@ func main() {
 	}
 
 	// load the templates
-	index, err := readTemplate(fs, "index.html")
+	index, err := readTemplate(fs, "/index.html")
 	if err != nil {
 		panic(err)
 	}
-	execute, err := readTemplate(fs, "execute.html")
+	execute, err := readTemplate(fs, "/execute.html")
 	if err != nil {
 		panic(err)
 	}
