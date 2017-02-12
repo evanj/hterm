@@ -8,7 +8,7 @@ import (
 
 // For flag docs see:
 // https://github.com/google/closure-compiler/wiki/Using-NTI-(new-type-inference)
-const closureVersion = "20161201"
+const closureVersion = "20170124"
 const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
 const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict " +
@@ -209,14 +209,19 @@ func main() {
 		// combine all js into a single file
 		&staticTarget{"../cmd/htermshell/static/htermshell.js", []string{buildOutput("js/hterm_all.js"), buildOutput("js/htermshell.js")}, []string{},
 			[]string{"cat $^ > $@"}},
+		&staticTarget{"../cmd/htermmenu/static/htermmenu.js", []string{buildOutput("js/hterm_all.js"), buildOutput("js/htermmenu.js")}, []string{},
+			[]string{"cat $^ > $@"}},
 	}
 
 	jsFiles := map[string]*jsDependencies{
-		// "js/consolechannel.js": &jsDependencies{
-		// 	[]string{}, []string{"js/node_externs.js", "js/hterm_externs.js"}},
+		"js/consolechannel.js": &jsDependencies{
+			[]string{}, []string{"js/node_externs.js", "js/hterm_externs.js"}},
 
 		"js/htermshell.js": &jsDependencies{[]string{
 			"js/consolechannel.js"}, []string{"js/hterm_externs.js", "js/node_externs.js"}},
+
+		"js/htermmenu.js": &jsDependencies{[]string{"js/consolechannel.js"},
+			[]string{"js/htermmenu_externs.js", "js/hterm_externs.js"}},
 
 		"__tests__/consolechannel-test.js": &jsDependencies{
 			[]string{"js/consolechannel.js"}, []string{"js/jasmine-2.0-externs.js", "js/node_externs.js", "js/hterm_externs.js"}},
