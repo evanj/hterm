@@ -17132,7 +17132,7 @@ lib.resource.add('hterm/audio/bell', 'audio/ogg;base64',
 );
 
 lib.resource.add('hterm/concat/date', 'text/plain',
-'Fri Feb 10 05:30:38 2017 +0000' +
+'Tue Jan 31 23:50:49 2017 -0500' +
 ''
 );
 

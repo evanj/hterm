@@ -6,9 +6,11 @@ import (
 	"strings"
 )
 
+const htermTag = "hterm-1.61"
+
 // For flag docs see:
 // https://github.com/google/closure-compiler/wiki/Using-NTI-(new-type-inference)
-const closureVersion = "20170124"
+const closureVersion = "20170218"
 const closureJAR = "closure-compiler-v" + closureVersion + ".jar"
 const closureJARPath = buildOutputDir + "/" + closureJAR
 const closureCompiler = "java -jar " + closureJARPath + " --emit_use_strict " +
@@ -191,7 +193,7 @@ func main() {
 	targets := []target{
 		&staticTarget{"libapps", []string{}, []string{},
 			[]string{
-				"git clone --depth 1 https://chromium.googlesource.com/apps/libapps build/libapps",
+				"git clone --depth 1 --branch " + htermTag + " https://chromium.googlesource.com/apps/libapps build/libapps",
 				// make the build deterministic:
 				// libdot's concat uses the current date; instead use the date of the last commit
 				"sed -i='' \"s/date -u '+%a, %d %b %Y %T %z'/git log -1 --format=%cd/\" build/libapps/hterm/concat/hterm_resources.concat",
